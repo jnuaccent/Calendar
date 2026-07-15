@@ -440,7 +440,14 @@ function init() {
     void refreshWeeklyCount();
   });
 
-  initSignIn({ buttonEl: el.signinButton, onChange: handleAuthChange });
+  // 실패(설정 미기입, GIS 스크립트 로드 실패)를 로그인 화면 안내로 노출 —
+  // 그러지 않으면 unhandled rejection으로 조용히 죽어 빈 화면만 남는다.
+  initSignIn({ buttonEl: el.signinButton, onChange: handleAuthChange }).catch((error) => {
+    el.signinNotice.textContent =
+      error instanceof AdminApiError
+        ? error.message
+        : '로그인 버튼을 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 새로고침해 주세요.';
+  });
   // 페이지 로드 시점에 이미 세션이 있으면 반영
   handleAuthChange(getUser());
 }
