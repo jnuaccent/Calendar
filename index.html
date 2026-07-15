@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>동아리 캘린더</title>
+  <!-- 상대 경로만 사용 — GitHub Pages 하위 경로 어디에 배포돼도 동작해야 함 -->
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1 class="app-title">동아리 캘린더</h1>
+
+    <div class="toolbar">
+      <div class="view-tabs" role="tablist" aria-label="달력 보기 방식">
+        <button id="tab-month" class="tab" type="button" role="tab" aria-selected="true">월간</button>
+        <button id="tab-week" class="tab" type="button" role="tab" aria-selected="false">주간</button>
+      </div>
+
+      <div class="date-controls">
+        <label class="visually-hidden" for="year-select">연도 선택</label>
+        <select id="year-select" class="select"></select>
+        <label class="visually-hidden" for="month-select">월 선택</label>
+        <select id="month-select" class="select"></select>
+        <button id="btn-today" class="btn" type="button">오늘</button>
+        <button id="btn-prev" class="btn btn-icon" type="button" aria-label="이전">&#8249;</button>
+        <button id="btn-next" class="btn btn-icon" type="button" aria-label="다음">&#8250;</button>
+      </div>
+    </div>
+
+    <h2 id="calendar-title" class="calendar-title" aria-live="polite"></h2>
+  </header>
+
+  <main class="app-main">
+    <div id="loading-indicator" class="loading-indicator" role="status" aria-live="polite" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      일정을 불러오는 중…
+    </div>
+
+    <div id="error-banner" class="error-banner" role="alert" hidden>
+      <span id="error-message"></span>
+      <button id="btn-retry" class="btn" type="button">다시 시도</button>
+    </div>
+
+    <section id="grid-container" class="grid-container" aria-label="달력"></section>
+
+    <section id="day-detail" class="day-detail" aria-label="선택한 날짜의 일정"></section>
+  </main>
+
+  <footer class="app-footer">
+    <p>일정 문의는 동아리 운영진에게 연락해 주세요.</p>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
