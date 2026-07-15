@@ -131,7 +131,7 @@ async function loadTeams() {
   el.teamSelect.textContent = '';
   const clubOption = document.createElement('option');
   clubOption.value = '';
-  clubOption.textContent = '동아리 행사 (팀 없음)';
+  clubOption.textContent = '팀 없음 — 동아리 행사·기타 일정';
   el.teamSelect.append(clubOption);
   try {
     teams = await listTeams();
@@ -160,7 +160,7 @@ async function refreshWeeklyCount() {
   el.weeklyCount.classList.remove('is-over-cap');
 
   if (!teamId) {
-    el.weeklyCount.textContent = '동아리 행사는 주간 예약 제한 대상이 아닙니다.';
+    el.weeklyCount.textContent = '팀이 지정되지 않은 일정은 주간 예약 제한 대상이 아닙니다.';
     return;
   }
   if (!dateISO) {
