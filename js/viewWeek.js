@@ -14,23 +14,16 @@ function buildChip(event) {
   chip.style.backgroundColor = color.translucentBg;
   chip.style.borderColor = color.border;
 
-  if (event.teamId) {
-    // 팀 일정: 팀명 첫 글자 모노그램 배지 (배경 대비로 흑/백 글자 자동 선택)
-    const badge = document.createElement('span');
-    badge.className = 'monogram-badge';
-    badge.style.backgroundColor = color.solid;
-    badge.style.color = color.monogramText;
-    badge.textContent = monogramFor(event.teamName ?? event.title);
-    badge.setAttribute('aria-hidden', 'true');
-    chip.append(badge);
-  } else {
-    // 동아리 행사(팀 없음): 요약할 팀명이 없으므로 모노그램 대신 색 점만
-    const dot = document.createElement('span');
-    dot.className = 'event-dot';
-    dot.style.backgroundColor = color.solid;
-    dot.setAttribute('aria-hidden', 'true');
-    chip.append(dot);
-  }
+  // 팀명(teamId 태깅 일정) 또는 제목 첫 글자 모노그램 배지 —
+  // teamId 없는 기존 일정도 제목이 곧 팀명인 데이터라 배지를 똑같이 보여준다.
+  // (배경 대비로 흑/백 글자 자동 선택)
+  const badge = document.createElement('span');
+  badge.className = 'monogram-badge';
+  badge.style.backgroundColor = color.solid;
+  badge.style.color = color.monogramText;
+  badge.textContent = monogramFor(event.teamName ?? event.title);
+  badge.setAttribute('aria-hidden', 'true');
+  chip.append(badge);
 
   const body = document.createElement('span');
   body.className = 'week-chip-body';

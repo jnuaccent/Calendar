@@ -352,21 +352,14 @@ function buildListItem(event) {
   const color = getEventColor(event);
   item.style.borderLeftColor = color.solid;
 
-  if (event.teamId) {
-    const badge = document.createElement('span');
-    badge.className = 'monogram-badge';
-    badge.style.backgroundColor = color.solid;
-    badge.style.color = color.monogramText;
-    badge.textContent = monogramFor(event.teamName ?? event.title);
-    badge.setAttribute('aria-hidden', 'true');
-    item.append(badge);
-  } else {
-    const dot = document.createElement('span');
-    dot.className = 'event-dot';
-    dot.style.backgroundColor = color.solid;
-    dot.setAttribute('aria-hidden', 'true');
-    item.append(dot);
-  }
+  // teamId 유무와 무관하게 모노그램 배지 — 태그 없는 기존 일정도 제목이 곧 팀명이다.
+  const badge = document.createElement('span');
+  badge.className = 'monogram-badge';
+  badge.style.backgroundColor = color.solid;
+  badge.style.color = color.monogramText;
+  badge.textContent = monogramFor(event.teamName ?? event.title);
+  badge.setAttribute('aria-hidden', 'true');
+  item.append(badge);
 
   const body = document.createElement('div');
   body.className = 'admin-event-body';

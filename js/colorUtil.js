@@ -78,8 +78,23 @@ export function colorForClubEvent() {
   return buildColorSet(CLUB_EVENT_HUE, CLUB_EVENT_SATURATION, CLUB_EVENT_LIGHTNESS);
 }
 
-export function getEventColor({ teamId } = {}) {
-  return teamId ? colorForTeamId(teamId) : colorForClubEvent();
+/**
+ * teamId 태그가 없는 이벤트(이 앱의 관리자 페이지 이전에 만들어진 기존 일정,
+ * 캘린더에서 직접 만든 일정)용 폴백: 제목을 해시해 황금각 간격에 대입한다.
+ * 같은 제목 = 항상 같은 색, 다른 제목끼리는 hue가 넓게 분산된다.
+ */
+export function colorForTitle(title) {
+  const trimmed = (title ?? '').trim();
+  if (!trimmed) return colorForClubEvent();
+  let hash = 0;
+  for (const ch of trimmed) {
+    hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
+  }
+  return buildColorSet(hueForTeamOrder(hash), TEAM_SATURATION, TEAM_LIGHTNESS);
+}
+
+export function getEventColor({ teamId, title } = {}) {
+  return teamId ? colorForTeamId(teamId) : colorForTitle(title);
 }
 
 /**
