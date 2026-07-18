@@ -1,448 +1,332 @@
-// 관리자 페이지 진입점: 로그인 UI, 팀 드롭다운, 실시간 주간 카운트, 경고 팝업, CRUD 배선.
-//
-// 쓰기(생성/수정/삭제)와 팀/카운트 조회는 adminApi.js(Apps Script Web App)를 통해,
-// 날짜별 이벤트 목록 "읽기"는 공개 페이지와 동일하게 googleCalendarApi.js(API 키)로 한다
-// (CONTRACT.md: 읽기 액션은 계약에 없음).
+// 관리자 페이지 진입점. 로그인/폼/실시간 카운트/CRUD 배선을 전부 이 파일에서 직접 한다 —
+// app.js와 마찬가지로 여러 계층을 조립하는 유일한 파일. 이벤트 목록 읽기는 공개 페이지와
+// 동일하게 googleCalendarApi.js를 그대로 재사용한다(관리자 전용 읽기 액션은 규약에 없음).
 
-import { WEEKLY_CAP, TIME_ZONE } from './config.js';
 import {
-  AdminApiError,
   initSignIn,
   getUser,
   signOut,
-  listTeams,
-  getWeeklyCount,
+  listBandTeams,
+  listLessonParts,
+  getWeeklyBandCount,
   createEvent,
   updateEvent,
   deleteEvent,
+  AdminApiError,
 } from './adminApi.js';
-import {
-  fetchEvents,
-  describeCalendarError,
-  CalendarApiError,
-} from './googleCalendarApi.js';
-import { getEventColor, monogramFor } from './colorUtil.js';
-import { todayKey, addDays, formatKoreanDate, keyToParts } from './dateUtils.js';
+import { fetchEvents, CalendarApiError } from './googleCalendarApi.js';
+import { addDays, todayISO } from './dateUtils.js';
+import { typeLabel } from './colorUtil.js';
 
-const el = {
-  signinSection: document.getElementById('signin-section'),
-  signinButton: document.getElementById('signin-button'),
-  signinNotice: document.getElementById('signin-notice'),
-  adminMain: document.getElementById('admin-main'),
-  userEmail: document.getElementById('user-email'),
-  btnSignout: document.getElementById('btn-signout'),
-  errorBanner: document.getElementById('admin-error'),
-  errorMessage: document.getElementById('admin-error-message'),
-  btnErrorDismiss: document.getElementById('btn-error-dismiss'),
+const els = {
+  signInButton: document.getElementById('sign-in-button'),
+  signOutButton: document.getElementById('sign-out-button'),
+  userLabel: document.getElementById('user-label'),
+  authError: document.getElementById('auth-error'),
+  adminPanel: document.getElementById('admin-panel'),
+
   form: document.getElementById('event-form'),
-  formHeading: document.getElementById('form-heading'),
+  eventTypeInputs: document.querySelectorAll('input[name="eventType"]'),
+  teamField: document.getElementById('team-field'),
   teamSelect: document.getElementById('team-select'),
+  partField: document.getElementById('part-field'),
+  partSelect: document.getElementById('part-select'),
+  weeklyCountLabel: document.getElementById('weekly-count-label'),
   titleInput: document.getElementById('title-input'),
+  commonTitleField: document.getElementById('common-title-field'),
   dateInput: document.getElementById('date-input'),
-  alldayCheckbox: document.getElementById('allday-checkbox'),
-  timeFields: document.getElementById('time-fields'),
+  allDayInput: document.getElementById('all-day-input'),
+  startTimeField: document.getElementById('start-time-field'),
   startTimeInput: document.getElementById('start-time-input'),
+  endTimeField: document.getElementById('end-time-field'),
   endTimeInput: document.getElementById('end-time-input'),
   descriptionInput: document.getElementById('description-input'),
-  weeklyCount: document.getElementById('weekly-count'),
-  btnSubmit: document.getElementById('btn-submit'),
-  btnCancelEdit: document.getElementById('btn-cancel-edit'),
-  listHeading: document.getElementById('event-list-heading'),
-  listStatus: document.getElementById('event-list-status'),
+  submitButton: document.getElementById('submit-button'),
+  cancelEditButton: document.getElementById('cancel-edit-button'),
+  formError: document.getElementById('form-error'),
+  formMode: document.getElementById('form-mode'),
+
   eventList: document.getElementById('event-list'),
 };
 
-let teams = []; // [{ teamId, name }]
+let bandTeams = [];
+let lessonParts = [];
 let editingEventId = null;
-let lastWeeklyCount = null; // 마지막으로 조회된 { teamId, dateISO, count }
-let expectSignOut = false; // 명시적 로그아웃과 토큰 만료를 구분
-let wasSignedIn = false;
 
-// ---------------------------------------------------------------------------
-// 에러/알림 표시
-// ---------------------------------------------------------------------------
-
-function showError(message) {
-  el.errorMessage.textContent = message;
-  el.errorBanner.hidden = false;
+function showAuthError(message) {
+  els.authError.textContent = message || '';
+  els.authError.hidden = !message;
 }
 
-function clearError() {
-  el.errorBanner.hidden = true;
-  el.errorMessage.textContent = '';
+function showFormError(message) {
+  els.formError.textContent = message || '';
+  els.formError.hidden = !message;
 }
 
-function handleAdminError(error) {
-  if (error instanceof AdminApiError) {
-    if (error.code === 'INVALID_TOKEN') {
-      // adminApi가 이미 세션을 지우고 onChange(null)를 호출한 상태 —
-      // 로그인 화면의 안내 문구는 handleAuthChange에서 표시된다.
-      return;
-    }
-    if (error.code === 'NOT_ADMIN') {
-      showError('관리자 권한이 없는 계정입니다. 관리자 이메일 목록에 등록된 계정으로 로그인해 주세요.');
-      return;
-    }
-    showError(error.message || `요청이 실패했습니다 (${error.code}).`);
-    return;
-  }
-  if (error instanceof CalendarApiError) {
-    showError(describeCalendarError(error));
-    return;
-  }
-  showError('알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+function currentEventType() {
+  return Array.from(els.eventTypeInputs).find((input) => input.checked)?.value || 'band';
 }
 
-// ---------------------------------------------------------------------------
-// 로그인 상태 전환
-// ---------------------------------------------------------------------------
-
-function handleAuthChange(user) {
-  clearError();
-  if (user) {
-    wasSignedIn = true;
-    expectSignOut = false;
-    el.signinNotice.textContent = '';
-    el.signinSection.hidden = true;
-    el.adminMain.hidden = false;
-    el.userEmail.textContent = user.email;
-    void bootstrapSignedIn();
-  } else {
-    el.adminMain.hidden = true;
-    el.signinSection.hidden = false;
-    if (wasSignedIn && !expectSignOut) {
-      el.signinNotice.textContent = '로그인이 만료되었습니다. 다시 로그인해 주세요.';
-    } else {
-      el.signinNotice.textContent = '';
-    }
-    wasSignedIn = false;
-    expectSignOut = false;
-    resetForm();
-  }
+function updateFormFieldsForType() {
+  const type = currentEventType();
+  els.teamField.hidden = type !== 'band';
+  els.partField.hidden = type !== 'lesson';
+  els.commonTitleField.hidden = type !== 'common';
+  els.weeklyCountLabel.hidden = type !== 'band';
+  if (type === 'band') refreshWeeklyCount();
 }
 
-async function bootstrapSignedIn() {
-  if (!el.dateInput.value) el.dateInput.value = todayKey(TIME_ZONE);
-  await loadTeams();
-  await Promise.all([refreshWeeklyCount(), refreshEventList()]);
+function updateAllDayFields() {
+  const isAllDay = els.allDayInput.checked;
+  els.startTimeField.hidden = isAllDay;
+  els.endTimeField.hidden = isAllDay;
 }
-
-async function loadTeams() {
-  el.teamSelect.textContent = '';
-  const clubOption = document.createElement('option');
-  clubOption.value = '';
-  clubOption.textContent = '팀 없음 — 동아리 행사·기타 일정';
-  el.teamSelect.append(clubOption);
-  try {
-    teams = await listTeams();
-    for (const team of teams) {
-      const opt = document.createElement('option');
-      opt.value = team.teamId;
-      opt.textContent = team.name;
-      el.teamSelect.append(opt);
-    }
-  } catch (error) {
-    teams = [];
-    handleAdminError(error);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// 주간 카운트
-// ---------------------------------------------------------------------------
-
-let countSeq = 0;
 
 async function refreshWeeklyCount() {
-  const teamId = el.teamSelect.value;
-  const dateISO = el.dateInput.value;
-  lastWeeklyCount = null;
-  el.weeklyCount.classList.remove('is-over-cap');
-
-  if (!teamId) {
-    el.weeklyCount.textContent = '팀이 지정되지 않은 일정은 주간 예약 제한 대상이 아닙니다.';
+  const teamId = els.teamSelect.value;
+  const dateISO = els.dateInput.value;
+  if (!teamId || !dateISO) {
+    els.weeklyCountLabel.textContent = '';
     return;
   }
-  if (!dateISO) {
-    el.weeklyCount.textContent = '날짜를 선택하면 이번 주 예약 수를 표시합니다.';
-    return;
-  }
-
-  const seq = ++countSeq;
-  el.weeklyCount.textContent = '이번 주 예약 수 확인 중…';
   try {
-    const result = await getWeeklyCount(teamId, dateISO);
-    if (seq !== countSeq) return;
-    lastWeeklyCount = { teamId, dateISO, count: result.count };
-    const s = keyToParts(result.weekStartISO);
-    const e = keyToParts(result.weekEndISO);
-    el.weeklyCount.textContent =
-      `이번 주(${s.month}/${s.day}~${e.month}/${e.day}) 예약 ${result.count}/${WEEKLY_CAP}건`;
-    if (result.count >= WEEKLY_CAP) el.weeklyCount.classList.add('is-over-cap');
-  } catch (error) {
-    if (seq !== countSeq) return;
-    el.weeklyCount.textContent = '주간 예약 수를 불러오지 못했습니다.';
-    handleAdminError(error);
+    const result = await getWeeklyBandCount(teamId, dateISO);
+    els.weeklyCountLabel.textContent = `이번 주(${result.weekStartISO} ~ ${result.weekEndISO}) 예약 ${result.count}/${result.cap}건`;
+    els.weeklyCountLabel.dataset.overCap = String(result.count >= result.cap);
+  } catch (err) {
+    els.weeklyCountLabel.textContent = '';
   }
 }
 
-// ---------------------------------------------------------------------------
-// 이벤트 폼
-// ---------------------------------------------------------------------------
+function populateSelect(selectEl, items, idField) {
+  selectEl.innerHTML = '';
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = '선택해 주세요';
+  selectEl.appendChild(placeholder);
+  for (const item of items) {
+    const option = document.createElement('option');
+    option.value = item[idField];
+    option.textContent = item.name;
+    selectEl.appendChild(option);
+  }
+}
 
-function syncTimeFieldVisibility() {
-  const allDay = el.alldayCheckbox.checked;
-  el.timeFields.hidden = allDay;
-  el.startTimeInput.disabled = allDay;
-  el.endTimeInput.disabled = allDay;
-  el.startTimeInput.required = !allDay;
-  el.endTimeInput.required = !allDay;
+async function loadRosters() {
+  [bandTeams, lessonParts] = await Promise.all([listBandTeams(), listLessonParts()]);
+  populateSelect(els.teamSelect, bandTeams, 'teamId');
+  populateSelect(els.partSelect, lessonParts, 'partId');
 }
 
 function resetForm() {
+  els.form.reset();
   editingEventId = null;
-  el.form.reset();
-  el.dateInput.value = todayKey(TIME_ZONE);
-  el.formHeading.textContent = '일정 등록';
-  el.btnSubmit.textContent = '등록';
-  el.btnCancelEdit.hidden = true;
-  syncTimeFieldVisibility();
-  lastWeeklyCount = null;
-  el.weeklyCount.classList.remove('is-over-cap');
-  el.weeklyCount.textContent = '';
+  els.formMode.textContent = '새 일정 등록';
+  els.cancelEditButton.hidden = true;
+  els.dateInput.value = todayISO();
+  updateFormFieldsForType();
+  updateAllDayFields();
+  showFormError(null);
 }
 
-function startEdit(event) {
-  editingEventId = event.id;
-  el.formHeading.textContent = '일정 수정';
-  el.btnSubmit.textContent = '수정 저장';
-  el.btnCancelEdit.hidden = false;
-
-  // 팀: teamId가 활성 팀 목록에 있으면 선택, 없으면(비활성/레거시) 동아리 행사로 폴백
-  const hasTeam = event.teamId && teams.some((t) => t.teamId === event.teamId);
-  el.teamSelect.value = hasTeam ? event.teamId : '';
-  el.titleInput.value = event.title;
-  el.dateInput.value = event.startKey;
-  el.alldayCheckbox.checked = event.allDay;
-  syncTimeFieldVisibility();
-  if (!event.allDay) {
-    el.startTimeInput.value = event.startLabel ?? '';
-    el.endTimeInput.value = event.endLabel ?? '';
-  } else {
-    el.startTimeInput.value = '';
-    el.endTimeInput.value = '';
+function buildTitle(type) {
+  if (type === 'band') {
+    const name = els.teamSelect.selectedOptions[0]?.textContent || '';
+    return `[${name}] 합주`;
   }
-  el.descriptionInput.value = event.description ?? '';
-
-  void refreshWeeklyCount();
-  el.titleInput.focus();
+  if (type === 'lesson') {
+    const name = els.partSelect.selectedOptions[0]?.textContent || '';
+    return `[${name}] 레슨`;
+  }
+  return `[공통] ${els.titleInput.value.trim()}`;
 }
 
-function buildTitle(rawTitle, teamId) {
-  const title = rawTitle.trim();
-  if (!teamId) return title;
-  if (title.startsWith('[')) return title; // 이미 "[팀명]" 프리픽스가 있음
-  const team = teams.find((t) => t.teamId === teamId);
-  return team ? `[${team.name}] ${title}` : title;
-}
-
-function validateForm() {
-  if (!el.titleInput.value.trim()) return '제목을 입력해 주세요.';
-  if (!el.dateInput.value) return '날짜를 선택해 주세요.';
-  if (!el.alldayCheckbox.checked) {
-    if (!el.startTimeInput.value || !el.endTimeInput.value) {
-      return '시작/종료 시각을 입력하거나 종일 일정으로 체크해 주세요.';
-    }
-    if (el.endTimeInput.value <= el.startTimeInput.value) {
-      return '종료 시각은 시작 시각보다 늦어야 합니다.';
-    }
-  }
-  return null;
-}
-
-async function onSubmit(e) {
-  e.preventDefault();
-  clearError();
-
-  const problem = validateForm();
-  if (problem) {
-    showError(problem);
-    return;
-  }
-
-  const teamId = el.teamSelect.value || null;
-  const dateISO = el.dateInput.value;
-
-  // 소프트 경고: 주 2건 이상이면 확인 팝업 (하드 블록 아님 — 확인하면 그대로 진행)
-  if (
-    teamId &&
-    lastWeeklyCount &&
-    lastWeeklyCount.teamId === teamId &&
-    lastWeeklyCount.dateISO === dateISO &&
-    lastWeeklyCount.count >= WEEKLY_CAP
-  ) {
-    const proceed = window.confirm(
-      `⚠️ 이 팀은 이번 주 이미 ${lastWeeklyCount.count}건 예약되어 있습니다. 그래도 등록하시겠습니까?`,
-    );
-    if (!proceed) return;
-  }
-
+function buildPayload() {
+  const type = currentEventType();
   const payload = {
-    teamId,
-    title: buildTitle(el.titleInput.value, teamId),
-    dateISO,
-    allDay: el.alldayCheckbox.checked,
-    startTime: el.alldayCheckbox.checked ? null : el.startTimeInput.value,
-    endTime: el.alldayCheckbox.checked ? null : el.endTimeInput.value,
-    description: el.descriptionInput.value.trim(),
+    eventType: type,
+    title: buildTitle(type),
+    dateISO: els.dateInput.value,
+    allDay: els.allDayInput.checked,
+    description: els.descriptionInput.value.trim(),
   };
+  if (type === 'band') payload.teamId = els.teamSelect.value;
+  if (type === 'lesson') payload.partId = els.partSelect.value;
+  if (!payload.allDay) {
+    payload.startTime = els.startTimeInput.value;
+    payload.endTime = els.endTimeInput.value;
+  }
+  return payload;
+}
 
-  el.btnSubmit.disabled = true;
+async function confirmOverCapIfNeeded(payload) {
+  if (payload.eventType !== 'band') return true;
+  const result = await getWeeklyBandCount(payload.teamId, payload.dateISO);
+  if (result.count < result.cap) return true;
+  return window.confirm(
+    `⚠️ 이 팀은 이번 주 이미 ${result.count}건 예약되어 있습니다. 그래도 등록하시겠습니까?`
+  );
+}
+
+async function handleSubmit(e) {
+  e.preventDefault();
+  showFormError(null);
+
+  const type = currentEventType();
+  if (type === 'band' && !els.teamSelect.value) return showFormError('밴드팀을 선택해 주세요.');
+  if (type === 'lesson' && !els.partSelect.value) return showFormError('파트를 선택해 주세요.');
+  if (type === 'common' && !els.titleInput.value.trim()) return showFormError('일정 제목을 입력해 주세요.');
+
+  const payload = buildPayload();
+
   try {
+    const proceed = await confirmOverCapIfNeeded(payload);
+    if (!proceed) return;
+
     if (editingEventId) {
       await updateEvent({ ...payload, eventId: editingEventId });
     } else {
       await createEvent(payload);
     }
     resetForm();
-    el.dateInput.value = dateISO; // 같은 날짜에 연속 작업하기 편하게 유지
-    await Promise.all([refreshWeeklyCount(), refreshEventList()]);
-  } catch (error) {
-    handleAdminError(error);
-  } finally {
-    el.btnSubmit.disabled = false;
+    await refreshEventList();
+  } catch (err) {
+    if (err instanceof AdminApiError) {
+      showFormError(err.message);
+    } else {
+      showFormError('알 수 없는 오류가 발생했습니다.');
+    }
   }
 }
 
-// ---------------------------------------------------------------------------
-// 선택한 날짜의 이벤트 목록 (읽기: 공개 read 경로 재사용)
-// ---------------------------------------------------------------------------
+function startEdit(event) {
+  editingEventId = event.id;
+  els.formMode.textContent = '일정 수정';
+  els.cancelEditButton.hidden = false;
 
-let listSeq = 0;
+  const type = event.eventType || 'common';
+  const typeInput = Array.from(els.eventTypeInputs).find((input) => input.value === type);
+  if (typeInput) typeInput.checked = true;
+  updateFormFieldsForType();
+
+  if (type === 'band') els.teamSelect.value = event.teamId || '';
+  if (type === 'lesson') els.partSelect.value = event.partId || '';
+  if (type === 'common') {
+    els.titleInput.value = event.title.replace(/^\[공통\]\s*/, '');
+  }
+
+  els.dateInput.value = event.startDateISO;
+  els.allDayInput.checked = event.allDay;
+  updateAllDayFields();
+  if (!event.allDay) {
+    els.startTimeInput.value = formatHHmm(event.start);
+    els.endTimeInput.value = formatHHmm(event.end);
+  }
+  els.descriptionInput.value = event.description || '';
+
+  if (type === 'band') refreshWeeklyCount();
+  window.scrollTo({ top: els.form.offsetTop, behavior: 'smooth' });
+}
+
+function formatHHmm(date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Seoul',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+}
+
+async function handleDelete(event) {
+  if (!window.confirm(`"${event.title}" 일정을 삭제하시겠습니까?`)) return;
+  try {
+    await deleteEvent(event.id);
+    await refreshEventList();
+  } catch (err) {
+    window.alert(err instanceof AdminApiError ? err.message : '삭제에 실패했습니다.');
+  }
+}
 
 async function refreshEventList() {
-  const dateISO = el.dateInput.value;
-  el.eventList.textContent = '';
-  if (!dateISO) {
-    el.listHeading.textContent = '해당 날짜의 일정';
-    el.listStatus.textContent = '날짜를 선택하면 그 날의 일정을 표시합니다.';
+  const start = todayISO();
+  const end = addDays(start, 60);
+  let events;
+  try {
+    events = await fetchEvents(start, end);
+  } catch (err) {
+    els.eventList.innerHTML = '';
+    const li = document.createElement('li');
+    li.textContent = err instanceof CalendarApiError ? err.message : '일정 목록을 불러오지 못했습니다.';
+    els.eventList.appendChild(li);
     return;
   }
 
-  el.listHeading.textContent = `${formatKoreanDate(dateISO)} 일정`;
-  el.listStatus.textContent = '일정을 불러오는 중…';
-
-  const seq = ++listSeq;
-  try {
-    const events = await fetchEvents(dateISO, addDays(dateISO, 1));
-    if (seq !== listSeq) return;
-    const dayEvents = events.filter((ev) => ev.dateKeys.includes(dateISO));
-    el.listStatus.textContent = dayEvents.length === 0 ? '이 날에는 일정이 없습니다.' : '';
-    for (const event of dayEvents) el.eventList.append(buildListItem(event));
-  } catch (error) {
-    if (seq !== listSeq) return;
-    el.listStatus.textContent = '일정 목록을 불러오지 못했습니다.';
-    handleAdminError(error);
+  els.eventList.innerHTML = '';
+  for (const event of events) {
+    els.eventList.appendChild(buildEventListItem(event));
   }
 }
 
-function buildListItem(event) {
+function buildEventListItem(event) {
   const item = document.createElement('li');
-  item.className = 'admin-event-item';
-  const color = getEventColor(event);
-  item.style.borderLeftColor = color.solid;
+  item.className = 'admin-event-list__item';
 
-  // teamId 유무와 무관하게 모노그램 배지 — 태그 없는 기존 일정도 제목이 곧 팀명이다.
-  const badge = document.createElement('span');
-  badge.className = 'monogram-badge';
-  badge.style.backgroundColor = color.solid;
-  badge.style.color = color.monogramText;
-  badge.textContent = monogramFor(event.teamName ?? event.title);
-  badge.setAttribute('aria-hidden', 'true');
-  item.append(badge);
+  const label = document.createElement('span');
+  label.textContent = `${event.startDateISO} · [${typeLabel(event.eventType)}] ${event.title}`;
+  item.appendChild(label);
 
-  const body = document.createElement('div');
-  body.className = 'admin-event-body';
-  const title = document.createElement('span');
-  title.className = 'admin-event-title';
-  title.textContent = event.title;
-  const time = document.createElement('span');
-  time.className = 'admin-event-time';
-  time.textContent = event.allDay ? '종일' : `${event.startLabel} – ${event.endLabel}`;
-  body.append(title, time);
-  item.append(body);
+  const editButton = document.createElement('button');
+  editButton.type = 'button';
+  editButton.textContent = '수정';
+  editButton.addEventListener('click', () => startEdit(event));
+  item.appendChild(editButton);
 
-  const actions = document.createElement('div');
-  actions.className = 'admin-event-actions';
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.textContent = '삭제';
+  deleteButton.addEventListener('click', () => handleDelete(event));
+  item.appendChild(deleteButton);
 
-  const editBtn = document.createElement('button');
-  editBtn.type = 'button';
-  editBtn.className = 'btn btn-small';
-  editBtn.textContent = '수정';
-  editBtn.addEventListener('click', () => startEdit(event));
-
-  const deleteBtn = document.createElement('button');
-  deleteBtn.type = 'button';
-  deleteBtn.className = 'btn btn-small btn-danger';
-  deleteBtn.textContent = '삭제';
-  deleteBtn.addEventListener('click', () => onDelete(event, deleteBtn));
-
-  actions.append(editBtn, deleteBtn);
-  item.append(actions);
   return item;
 }
 
-async function onDelete(event, button) {
-  const proceed = window.confirm(`'${event.title}' 일정을 삭제하시겠습니까? 되돌릴 수 없습니다.`);
-  if (!proceed) return;
-  clearError();
-  button.disabled = true;
-  try {
-    await deleteEvent(event.id);
-    if (editingEventId === event.id) resetForm();
-    await Promise.all([refreshWeeklyCount(), refreshEventList()]);
-  } catch (error) {
-    button.disabled = false;
-    handleAdminError(error);
+async function onAuthChange(user) {
+  els.adminPanel.hidden = true; // NOT_ADMIN 등으로 검증에 실패하면 계속 숨김 상태로 둔다
+  els.signOutButton.hidden = !user;
+  els.userLabel.textContent = user ? `${user.name} (${user.email})` : '';
+
+  if (!user) {
+    showAuthError(null);
+    return;
   }
+
+  showAuthError(null);
+  try {
+    await loadRosters(); // 관리자 목록 대조는 서버가 이 호출에서 수행 — 실패하면 NOT_ADMIN
+  } catch (err) {
+    showAuthError(err instanceof AdminApiError ? err.message : '관리자 정보를 불러오지 못했습니다.');
+    return;
+  }
+
+  els.adminPanel.hidden = false;
+  resetForm();
+  await refreshEventList();
 }
 
-// ---------------------------------------------------------------------------
-// 초기화
-// ---------------------------------------------------------------------------
-
-function init() {
-  syncTimeFieldVisibility();
-
-  el.btnSignout.addEventListener('click', () => {
-    expectSignOut = true;
-    signOut();
-  });
-  el.btnErrorDismiss.addEventListener('click', clearError);
-  el.alldayCheckbox.addEventListener('change', syncTimeFieldVisibility);
-  el.teamSelect.addEventListener('change', refreshWeeklyCount);
-  el.dateInput.addEventListener('change', () => {
-    void refreshWeeklyCount();
-    void refreshEventList();
-  });
-  el.form.addEventListener('submit', onSubmit);
-  el.btnCancelEdit.addEventListener('click', () => {
-    const keepDate = el.dateInput.value;
-    resetForm();
-    if (keepDate) el.dateInput.value = keepDate;
-    void refreshWeeklyCount();
-  });
-
-  // 실패(설정 미기입, GIS 스크립트 로드 실패)를 로그인 화면 안내로 노출 —
-  // 그러지 않으면 unhandled rejection으로 조용히 죽어 빈 화면만 남는다.
-  initSignIn({ buttonEl: el.signinButton, onChange: handleAuthChange }).catch((error) => {
-    el.signinNotice.textContent =
-      error instanceof AdminApiError
-        ? error.message
-        : '로그인 버튼을 불러오지 못했습니다. 네트워크 상태를 확인한 뒤 새로고침해 주세요.';
-  });
-  // 페이지 로드 시점에 이미 세션이 있으면 반영
-  handleAuthChange(getUser());
+function wireEvents() {
+  for (const input of els.eventTypeInputs) {
+    input.addEventListener('change', updateFormFieldsForType);
+  }
+  els.teamSelect.addEventListener('change', refreshWeeklyCount);
+  els.dateInput.addEventListener('change', refreshWeeklyCount);
+  els.allDayInput.addEventListener('change', updateAllDayFields);
+  els.form.addEventListener('submit', handleSubmit);
+  els.cancelEditButton.addEventListener('click', resetForm);
+  els.signOutButton.addEventListener('click', signOut);
 }
 
-init();
+wireEvents();
+initSignIn({ buttonEl: els.signInButton, onChange: onAuthChange });
+
+const existingUser = getUser();
+if (existingUser) onAuthChange(existingUser);

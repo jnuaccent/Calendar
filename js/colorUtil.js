@@ -1,116 +1,124 @@
+// teamId/partId -> 색상 데이터. 순수 함수, DOM 접근 없음.
+// 실제 화면에 적용하는 방식(칩 모양, 여백, 폰트 등)은 전부 css/styles.css의
+// [data-event-type] 규칙이 담당한다 — 이 파일은 오직 "데이터"인 hue와, 그로부터 계산한
+// 색 문자열/타입 배지만 돌려준다. 팀/파트 이름 자체를 식별 수단으로 쓰는 건 화면 계층에서
+// 캡션 텍스트로 처리한다(색+배지는 보조 수단일 뿐).
+
 const GOLDEN_ANGLE_DEG = 137.50776405003785;
-
-const TEAM_SATURATION = 68;
-const TEAM_LIGHTNESS = 46;
-
-const CLUB_EVENT_HUE = 210;
-const CLUB_EVENT_SATURATION = 55;
-const CLUB_EVENT_LIGHTNESS = 36;
-
-const UNKNOWN_LIGHTNESS = 55;
-
-const MONOGRAM_DARK_TEXT = '#12140f';
-const MONOGRAM_LIGHT_TEXT = '#fbfdfb';
 
 function normalizeHue(hue) {
   return ((hue % 360) + 360) % 360;
 }
 
-function hslToRgb(h, s, l) {
-  const sat = s / 100;
-  const light = l / 100;
-  const k = (n) => (n + h / 30) % 12;
-  const a = sat * Math.min(light, 1 - light);
-  const f = (n) => light - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return [f(0), f(8), f(4)].map((v) => v * 255);
-}
-
-function relativeLuminance([r, g, b]) {
-  const [rl, gl, bl] = [r, g, b].map((c) => {
-    const cs = c / 255;
-    return cs <= 0.03928 ? cs / 12.92 : ((cs + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
-}
-
-// WCAG contrast ratio of a color against white/black, used to pick readable
-// monogram-badge text instead of assuming white text works on every hue
-// (HSL "lightness" isn't perceptual — yellow hues read much brighter than
-// blue/purple hues at the same L, so a fixed text color breaks on some hues).
-function readableTextFor(hue, saturation, lightness) {
-  const luminance = relativeLuminance(hslToRgb(hue, saturation, lightness));
+/** 배경색(hsl)에 대해 흰 글자/검은 글자 중 상대 휘도 기준으로 대비가 더 큰 쪽을 고른다.
+ * HSL의 lightness는 지각적 밝기가 아니라서(노란 계열이 남색 계열보다 훨씬 밝게 보임),
+ * 고정된 흰 글자를 쓰면 일부 hue에서 안 보이는 문제가 생긴다 — 그래서 실제 RGB 상대
+ * 휘도를 계산해서 고른다. */
+function pickContrastTextColor(hue, saturation, lightness) {
+  const { r, g, b } = hslToRgb(hue, saturation, lightness);
+  const luminance = relativeLuminance(r, g, b);
   const contrastWithWhite = 1.05 / (luminance + 0.05);
   const contrastWithBlack = (luminance + 0.05) / 0.05;
-  return contrastWithBlack > contrastWithWhite ? MONOGRAM_DARK_TEXT : MONOGRAM_LIGHT_TEXT;
+  return contrastWithWhite >= contrastWithBlack ? '#ffffff' : '#1a1a1a';
 }
 
-function buildColorSet(hue, saturation, lightness) {
-  const h = Math.round(normalizeHue(hue));
+function hslToRgb(h, s, l) {
+  s /= 100;
+  l /= 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return { r: f(0) * 255, g: f(8) * 255, b: f(4) * 255 };
+}
+
+function channelLuminance(c) {
+  const v = c / 255;
+  return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(r, g, b) {
+  return (
+    0.2126 * channelLuminance(r) +
+    0.7152 * channelLuminance(g) +
+    0.0722 * channelLuminance(b)
+  );
+}
+
+function hashString(str) {
+  let hash = 0;
+  for (const ch of Array.from(str)) {
+    hash = (hash * 31 + ch.codePointAt(0)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+/** 밴드팀: 등록순번 teamId x 황금각. 꽉 찬 칩(solid fill). */
+export function colorForBandTeam(teamId) {
+  const hue = normalizeHue(Number(teamId) * GOLDEN_ANGLE_DEG);
+  const saturation = 68;
+  const lightness = 46;
   return {
-    hue: h,
-    solid: `hsl(${h}, ${saturation}%, ${lightness}%)`,
-    translucentBg: `hsla(${h}, ${saturation}%, ${lightness}%, 0.14)`,
-    border: `hsla(${h}, ${saturation}%, ${lightness}%, 0.5)`,
-    monogramText: readableTextFor(h, saturation, lightness),
+    hue,
+    background: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
+    border: `hsl(${hue}, ${saturation}%, ${Math.max(lightness - 12, 0)}%)`,
+    textColor: pickContrastTextColor(hue, saturation, lightness),
+    badge: '합',
   };
 }
 
-/**
- * Spaces team hues by the golden angle so each newly registered team's color
- * lands maximally far from every color already assigned, regardless of how
- * many teams exist so far. Depends on teamId being the team's registration
- * order as a plain integer ("1", "2", "3", ...) — assigned once when the team
- * is first added to the roster sheet and never reused or reassigned.
- */
-export function hueForTeamOrder(order) {
-  return normalizeHue(order * GOLDEN_ANGLE_DEG);
+/** 레슨파트: teamId와 같은 숫자라도 절대 안 겹치도록 +180도 위상 오프셋. 테두리만 있는 칩(outline). */
+export function colorForLessonPart(partId) {
+  const hue = normalizeHue(Number(partId) * GOLDEN_ANGLE_DEG + 180);
+  return {
+    hue,
+    background: `hsla(${hue}, 60%, 50%, 0.12)`,
+    border: `hsl(${hue}, 60%, 42%)`,
+    textColor: `hsl(${hue}, 60%, 28%)`,
+    badge: '레',
+  };
 }
 
-export function colorForTeamId(teamId) {
-  const order = Number.parseInt(teamId, 10);
-  if (!Number.isInteger(order) || order < 1) {
-    return buildColorSet(0, 0, UNKNOWN_LIGHTNESS);
-  }
-  return buildColorSet(hueForTeamOrder(order), TEAM_SATURATION, TEAM_LIGHTNESS);
+/** 공통 일정: 생성된 hue 공간과 절대 겹치지 않는 고정 남색, 밴드/레슨과 다른 solid 스타일. */
+export function colorForCommon() {
+  const hue = 222;
+  return {
+    hue,
+    background: `hsl(${hue}, 45%, 30%)`,
+    border: `hsl(${hue}, 45%, 22%)`,
+    textColor: '#ffffff',
+    badge: '공',
+  };
 }
 
-export function colorForClubEvent() {
-  return buildColorSet(CLUB_EVENT_HUE, CLUB_EVENT_SATURATION, CLUB_EVENT_LIGHTNESS);
-}
+const TYPE_LABELS = { band: '합주', lesson: '레슨', common: '공통' };
 
-/**
- * teamId 태그가 없는 이벤트(이 앱의 관리자 페이지 이전에 만들어진 기존 일정,
- * 캘린더에서 직접 만든 일정)용 폴백: 제목을 해시해 황금각 간격에 대입한다.
- * 같은 제목 = 항상 같은 색, 다른 제목끼리는 hue가 넓게 분산된다.
- */
-export function colorForTitle(title) {
-  const trimmed = (title ?? '').trim();
-  if (!trimmed) return colorForClubEvent();
-  let hash = 0;
-  for (const ch of trimmed) {
-    hash = (hash * 31 + ch.codePointAt(0)) >>> 0;
-  }
-  return buildColorSet(hueForTeamOrder(hash), TEAM_SATURATION, TEAM_LIGHTNESS);
-}
-
-export function getEventColor({ teamId, title } = {}) {
-  return teamId ? colorForTeamId(teamId) : colorForTitle(title);
+/** eventType -> 화면에 풀어 쓰는 한글 라벨. 알 수 없는 타입은 '미분류'. */
+export function typeLabel(eventType) {
+  return TYPE_LABELS[eventType] || '미분류';
 }
 
 /**
- * First character of a team's display name for the monogram badge shown in
- * roomier layouts (week-view chips, day-detail panel) — never the compact
- * month grid, where there isn't room and it would just add clutter on top of
- * the already-truncated label.
- *
- * Uses Array.from (code-point aware) rather than name[0]/name.charAt(0),
- * which can split a surrogate pair in half and render a broken glyph for
- * emoji or other characters outside the BMP. Latin letters are uppercased
- * for consistency; Hangul and other scripts are already single units.
+ * 정규화된 이벤트(googleCalendarApi.js가 만든 { eventType, teamId, partId, title } 형태) ->
+ * 색상 데이터. 화면 계층은 이 함수 하나만 알면 되고, "어떤 타입이 어떤 색 함수로 가는지"는
+ * 여기(데이터 계층)에서만 결정한다.
  */
-export function monogramFor(teamName) {
-  const trimmed = (teamName ?? '').trim();
-  if (!trimmed) return '?';
-  const first = Array.from(trimmed)[0];
-  return /[a-z]/.test(first) ? first.toUpperCase() : first;
+export function colorForEvent(event) {
+  if (event.eventType === 'band' && event.teamId != null) return colorForBandTeam(event.teamId);
+  if (event.eventType === 'lesson' && event.partId != null) return colorForLessonPart(event.partId);
+  if (event.eventType === 'common') return colorForCommon();
+  return colorForUnknown(event.title);
+}
+
+/** extendedProperties가 없는(네이티브 캘린더에서 직접 만든) 레거시/예외 이벤트 폴백.
+ * 제목을 해시해서 같은 제목=같은 색이 되게 하되, 점선 테두리로 "태그 없음"을 시각적으로 구분한다. */
+export function colorForUnknown(title) {
+  const hue = normalizeHue(hashString(title || ''));
+  return {
+    hue,
+    background: `hsl(${hue}, 12%, 55%)`,
+    border: `hsl(${hue}, 12%, 40%)`,
+    textColor: '#ffffff',
+    badge: '?',
+    dashed: true,
+  };
 }

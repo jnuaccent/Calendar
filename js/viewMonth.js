@@ -1,131 +1,112 @@
-// 월간 7x6 그리드 렌더러.
-// 팀 식별: 칸이 좁으므로 모노그램 배지 없이 "색 점 + 잘린 텍스트 라벨"만 사용,
-// 초과분은 "외 N건" 배지 (plan의 "팀 식별 UI" 절).
+// 월간 그리드 렌더링. state에서 이미 정규화된 데이터를 읽어 DOM만 만든다 — fetch/계산 없음.
+// 자체 템플릿 엔진 없이 직접 createElement/textContent/classList를 쓴다.
 
-import { MONTH_CELL_MAX_EVENTS } from './config.js';
-import { getEventColor } from './colorUtil.js';
-import {
-  WEEKDAY_LABELS,
-  monthGridKeys,
-  keyToParts,
-  formatKoreanDateLong,
-} from './dateUtils.js';
+import { monthGridDates, isSameMonth, todayISO, formatMonthLabel } from './dateUtils.js';
+import { colorForEvent } from './colorUtil.js';
+import { state, eventsOnDate } from './state.js';
 
-function buildEventRow(event) {
-  const color = getEventColor(event);
-  const row = document.createElement('div');
-  row.className = 'month-event';
-  row.style.backgroundColor = color.translucentBg;
+const MAX_CHIPS_PER_CELL = 2;
+const WEEKDAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'];
 
-  const dot = document.createElement('span');
-  dot.className = 'event-dot';
-  dot.style.backgroundColor = color.solid;
-  dot.setAttribute('aria-hidden', 'true');
-
-  const label = document.createElement('span');
-  label.className = 'month-event-label';
-  if (!event.allDay && event.startLabel) {
-    const time = document.createElement('span');
-    time.className = 'month-event-time';
-    time.textContent = event.startLabel;
-    label.append(time, ` ${event.title}`);
-  } else {
-    label.textContent = event.title;
-  }
-
-  row.append(dot, label);
-  return row;
+export function monthLabel() {
+  return formatMonthLabel(state.viewDate);
 }
 
 /**
- * @param {HTMLElement} container
- * @param {{
- *   year: number, month: number,
- *   todayKey: string, selectedKey: string|null,
- *   getEventsForKey: (key: string) => Array,
- *   onSelectDay: (key: string) => void,
- * }} props
+ * container(월 그리드 루트 엘리먼트)를 비우고 다시 그린다.
+ * onSelectDate(dateISO)는 날짜 셀 클릭/키보드 선택 시 호출된다.
  */
-export function renderMonthView(container, props) {
-  const { year, month, todayKey, selectedKey, getEventsForKey, onSelectDay } = props;
+export function renderMonth(container, { onSelectDate }) {
+  container.innerHTML = '';
+  container.setAttribute('role', 'grid');
+  container.setAttribute('aria-label', monthLabel());
 
-  container.textContent = '';
-  container.dataset.cols = '7';
-
-  const grid = document.createElement('div');
-  grid.className = 'month-grid';
-  grid.setAttribute('role', 'grid');
-  grid.setAttribute('aria-label', `${year}년 ${month}월 월간 달력`);
-
-  const headRow = document.createElement('div');
-  headRow.className = 'grid-head-row';
-  headRow.setAttribute('role', 'row');
-  for (const [i, name] of WEEKDAY_LABELS.entries()) {
-    const head = document.createElement('div');
-    head.className = 'grid-head-cell';
-    if (i === 5) head.classList.add('is-saturday');
-    if (i === 6) head.classList.add('is-sunday');
-    head.setAttribute('role', 'columnheader');
-    head.textContent = name;
-    headRow.append(head);
+  const header = document.createElement('div');
+  header.className = 'month-grid__weekdays';
+  for (const label of WEEKDAY_LABELS) {
+    const cell = document.createElement('div');
+    cell.className = 'month-grid__weekday';
+    cell.textContent = label;
+    header.appendChild(cell);
   }
-  grid.append(headRow);
+  container.appendChild(header);
 
-  const keys = monthGridKeys(year, month);
-  for (let rowIdx = 0; rowIdx < 6; rowIdx += 1) {
-    const row = document.createElement('div');
-    row.className = 'grid-row';
-    row.setAttribute('role', 'row');
+  const body = document.createElement('div');
+  body.className = 'month-grid__body';
 
-    for (let colIdx = 0; colIdx < 7; colIdx += 1) {
-      const key = keys[rowIdx * 7 + colIdx];
-      const parts = keyToParts(key);
-      const events = getEventsForKey(key);
+  const today = todayISO();
+  const dates = monthGridDates(state.viewDate);
 
-      const cell = document.createElement('div');
-      cell.className = 'day-cell month-cell';
-      cell.setAttribute('role', 'gridcell');
-      cell.dataset.dateKey = key;
-      cell.tabIndex = -1;
-      if (parts.month !== month) cell.classList.add('is-outside');
-      if (colIdx === 5) cell.classList.add('is-saturday');
-      if (colIdx === 6) cell.classList.add('is-sunday');
-      if (key === todayKey) {
-        cell.classList.add('is-today');
-        cell.setAttribute('aria-current', 'date');
-      }
-      if (key === selectedKey) {
-        cell.classList.add('is-selected');
-        cell.setAttribute('aria-selected', 'true');
-      } else {
-        cell.setAttribute('aria-selected', 'false');
-      }
-      const countText = events.length > 0 ? `, 일정 ${events.length}건` : ', 일정 없음';
-      cell.setAttribute('aria-label', `${formatKoreanDateLong(key)}${countText}`);
-
-      const dayNum = document.createElement('span');
-      dayNum.className = 'day-number';
-      dayNum.textContent = String(parts.day);
-      cell.append(dayNum);
-
-      const list = document.createElement('div');
-      list.className = 'month-event-list';
-      for (const event of events.slice(0, MONTH_CELL_MAX_EVENTS)) {
-        list.append(buildEventRow(event));
-      }
-      if (events.length > MONTH_CELL_MAX_EVENTS) {
-        const more = document.createElement('span');
-        more.className = 'more-badge';
-        more.textContent = `외 ${events.length - MONTH_CELL_MAX_EVENTS}건`;
-        list.append(more);
-      }
-      cell.append(list);
-
-      cell.addEventListener('click', () => onSelectDay(key));
-      row.append(cell);
-    }
-    grid.append(row);
+  for (const dateISO of dates) {
+    body.appendChild(buildDayCell(dateISO, today, onSelectDate));
   }
 
-  container.append(grid);
+  container.appendChild(body);
+}
+
+function buildDayCell(dateISO, today, onSelectDate) {
+  const cell = document.createElement('button');
+  cell.type = 'button';
+  cell.className = 'month-grid__cell';
+  cell.setAttribute('role', 'gridcell');
+  cell.dataset.date = dateISO;
+
+  if (!isSameMonth(dateISO, state.viewDate)) {
+    cell.classList.add('month-grid__cell--outside');
+  }
+  if (dateISO === today) {
+    cell.classList.add('month-grid__cell--today');
+    cell.setAttribute('aria-current', 'date');
+  }
+  if (dateISO === state.selectedDate) {
+    cell.classList.add('month-grid__cell--selected');
+  }
+
+  const dayNumber = document.createElement('span');
+  dayNumber.className = 'month-grid__day-number';
+  dayNumber.textContent = String(Number(dateISO.slice(8, 10)));
+  cell.appendChild(dayNumber);
+
+  const events = eventsOnDate(dateISO);
+  const chipList = document.createElement('div');
+  chipList.className = 'month-grid__chips';
+
+  const visible = events.slice(0, MAX_CHIPS_PER_CELL);
+  for (const event of visible) {
+    chipList.appendChild(buildChip(event));
+  }
+  if (events.length > MAX_CHIPS_PER_CELL) {
+    const overflow = document.createElement('span');
+    overflow.className = 'month-grid__overflow';
+    overflow.textContent = `외 ${events.length - MAX_CHIPS_PER_CELL}건`;
+    chipList.appendChild(overflow);
+  }
+  cell.appendChild(chipList);
+
+  cell.setAttribute('aria-label', `${dateISO}, 일정 ${events.length}건`);
+  cell.addEventListener('click', () => onSelectDate(dateISO));
+
+  return cell;
+}
+
+function buildChip(event) {
+  const color = colorForEvent(event);
+  const chip = document.createElement('span');
+  chip.className = 'event-chip event-chip--month';
+  chip.dataset.eventType = event.eventType || 'unknown';
+  chip.style.setProperty('--event-bg', color.background);
+  chip.style.setProperty('--event-border', color.border);
+  chip.style.setProperty('--event-fg', color.textColor);
+
+  const badge = document.createElement('span');
+  badge.className = 'event-chip__badge';
+  badge.textContent = color.badge;
+  chip.appendChild(badge);
+
+  const title = document.createElement('span');
+  title.className = 'event-chip__title';
+  title.textContent = event.title;
+  chip.appendChild(title);
+
+  return chip;
 }

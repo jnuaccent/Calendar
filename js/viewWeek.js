@@ -1,142 +1,104 @@
-// 주간 뷰 렌더러 — 월간 뷰의 "2건 + 뱃지" 재사용이 아니라 자체 레이아웃.
-// 각 요일 칸: 종일 일정 칩을 상단에, 시간 일정을 그 아래 목록으로 분리.
-// 칩 = 모노그램 배지(팀 일정) 또는 색 점(동아리 행사) + 전체 라벨 + 시각.
-// 모바일에서는 CSS가 7열 그리드를 세로 아젠다 리스트로 전환한다 (DOM은 동일).
+// 주간 그리드 렌더링. 월간 뷰와 달리 셀 공간이 넓으므로 더 많은 이벤트를 보여주고,
+// 타입 전체 단어 + 팀/파트 이름 캡션까지 표시한다. DOM만 그린다 — fetch/계산 없음.
 
-import { WEEK_CELL_MAX_EVENTS } from './config.js';
-import { getEventColor, monogramFor } from './colorUtil.js';
-import { WEEKDAY_LABELS, keyToParts, formatKoreanDateLong } from './dateUtils.js';
+import { weekDates, todayISO, formatTimeLabel } from './dateUtils.js';
+import { colorForEvent, typeLabel } from './colorUtil.js';
+import { state, eventsOnDate } from './state.js';
 
-function buildChip(event) {
-  const color = getEventColor(event);
-  const chip = document.createElement('div');
-  chip.className = event.allDay ? 'week-chip is-allday' : 'week-chip';
-  chip.style.backgroundColor = color.translucentBg;
-  chip.style.borderColor = color.border;
+const MAX_CHIPS_PER_CELL = 8;
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('ko-KR', { weekday: 'short', timeZone: 'Asia/Seoul' });
 
-  // 팀명(teamId 태깅 일정) 또는 제목 첫 글자 모노그램 배지 —
-  // teamId 없는 기존 일정도 제목이 곧 팀명인 데이터라 배지를 똑같이 보여준다.
-  // (배경 대비로 흑/백 글자 자동 선택)
-  const badge = document.createElement('span');
-  badge.className = 'monogram-badge';
-  badge.style.backgroundColor = color.solid;
-  badge.style.color = color.monogramText;
-  badge.textContent = monogramFor(event.teamName ?? event.title);
-  badge.setAttribute('aria-hidden', 'true');
-  chip.append(badge);
+export function renderWeek(container, { onSelectDate }) {
+  container.innerHTML = '';
+  container.setAttribute('role', 'grid');
 
-  const body = document.createElement('span');
-  body.className = 'week-chip-body';
-
-  const label = document.createElement('span');
-  label.className = 'week-chip-label';
-  label.textContent = event.title;
-  body.append(label);
-
-  const time = document.createElement('span');
-  time.className = 'week-chip-time';
-  time.textContent = event.allDay ? '종일' : `${event.startLabel} – ${event.endLabel}`;
-  body.append(time);
-
-  chip.append(body);
-  return chip;
-}
-
-/**
- * @param {HTMLElement} container
- * @param {{
- *   weekKeys: string[],
- *   todayKey: string, selectedKey: string|null,
- *   getEventsForKey: (key: string) => Array,
- *   onSelectDay: (key: string) => void,
- * }} props
- */
-export function renderWeekView(container, props) {
-  const { weekKeys, todayKey, selectedKey, getEventsForKey, onSelectDay } = props;
-
-  container.textContent = '';
-  container.dataset.cols = '7';
+  const dates = weekDates(state.viewDate);
+  const today = todayISO();
 
   const grid = document.createElement('div');
   grid.className = 'week-grid';
-  grid.setAttribute('role', 'grid');
-  grid.setAttribute('aria-label', '주간 달력');
 
-  const row = document.createElement('div');
-  row.className = 'week-row';
-  row.setAttribute('role', 'row');
-
-  for (const [i, key] of weekKeys.entries()) {
-    const parts = keyToParts(key);
-    const events = getEventsForKey(key);
-
-    const cell = document.createElement('div');
-    cell.className = 'day-cell week-cell';
-    cell.setAttribute('role', 'gridcell');
-    cell.dataset.dateKey = key;
-    cell.tabIndex = -1;
-    if (i === 5) cell.classList.add('is-saturday');
-    if (i === 6) cell.classList.add('is-sunday');
-    if (key === todayKey) {
-      cell.classList.add('is-today');
-      cell.setAttribute('aria-current', 'date');
-    }
-    if (key === selectedKey) {
-      cell.classList.add('is-selected');
-      cell.setAttribute('aria-selected', 'true');
-    } else {
-      cell.setAttribute('aria-selected', 'false');
-    }
-    const countText = events.length > 0 ? `, 일정 ${events.length}건` : ', 일정 없음';
-    cell.setAttribute('aria-label', `${formatKoreanDateLong(key)}${countText}`);
-
-    const head = document.createElement('div');
-    head.className = 'week-cell-head';
-    const dayName = document.createElement('span');
-    dayName.className = 'week-day-name';
-    dayName.textContent = WEEKDAY_LABELS[i];
-    const dayNum = document.createElement('span');
-    dayNum.className = 'day-number';
-    dayNum.textContent = String(parts.day);
-    head.append(dayName, dayNum);
-    cell.append(head);
-
-    const visible = events.slice(0, WEEK_CELL_MAX_EVENTS);
-    const allDayEvents = visible.filter((e) => e.allDay);
-    const timedEvents = visible.filter((e) => !e.allDay);
-
-    if (allDayEvents.length > 0) {
-      const allDayBox = document.createElement('div');
-      allDayBox.className = 'week-allday-list';
-      for (const event of allDayEvents) allDayBox.append(buildChip(event));
-      cell.append(allDayBox);
-    }
-
-    if (timedEvents.length > 0) {
-      const timedBox = document.createElement('div');
-      timedBox.className = 'week-timed-list';
-      for (const event of timedEvents) timedBox.append(buildChip(event));
-      cell.append(timedBox);
-    }
-
-    if (events.length > WEEK_CELL_MAX_EVENTS) {
-      const more = document.createElement('span');
-      more.className = 'more-badge';
-      more.textContent = `외 ${events.length - WEEK_CELL_MAX_EVENTS}건`;
-      cell.append(more);
-    }
-
-    if (events.length === 0) {
-      const empty = document.createElement('span');
-      empty.className = 'week-empty';
-      empty.textContent = '일정 없음';
-      cell.append(empty);
-    }
-
-    cell.addEventListener('click', () => onSelectDay(key));
-    row.append(cell);
+  for (const dateISO of dates) {
+    grid.appendChild(buildDayColumn(dateISO, today, onSelectDate));
   }
 
-  grid.append(row);
-  container.append(grid);
+  container.appendChild(grid);
+}
+
+function buildDayColumn(dateISO, today, onSelectDate) {
+  const column = document.createElement('div');
+  column.className = 'week-grid__column';
+  if (dateISO === today) column.classList.add('week-grid__column--today');
+  if (dateISO === state.selectedDate) column.classList.add('week-grid__column--selected');
+
+  const header = document.createElement('button');
+  header.type = 'button';
+  header.className = 'week-grid__day-header';
+  header.dataset.date = dateISO;
+  if (dateISO === today) header.setAttribute('aria-current', 'date');
+  header.textContent = `${WEEKDAY_FORMATTER.format(new Date(dateISO + 'T12:00:00'))} ${Number(dateISO.slice(8, 10))}`;
+  header.addEventListener('click', () => onSelectDate(dateISO));
+  column.appendChild(header);
+
+  const events = eventsOnDate(dateISO);
+  const allDayEvents = events.filter((e) => e.allDay);
+  const timedEvents = events.filter((e) => !e.allDay);
+
+  if (allDayEvents.length > 0) {
+    const allDayList = document.createElement('div');
+    allDayList.className = 'week-grid__all-day';
+    for (const event of allDayEvents) {
+      allDayList.appendChild(buildChip(event));
+    }
+    column.appendChild(allDayList);
+  }
+
+  const timedList = document.createElement('div');
+  timedList.className = 'week-grid__timed';
+  const visible = timedEvents.slice(0, MAX_CHIPS_PER_CELL);
+  for (const event of visible) {
+    timedList.appendChild(buildChip(event));
+  }
+  if (timedEvents.length > MAX_CHIPS_PER_CELL) {
+    const overflow = document.createElement('span');
+    overflow.className = 'week-grid__overflow';
+    overflow.textContent = `외 ${timedEvents.length - MAX_CHIPS_PER_CELL}건`;
+    timedList.appendChild(overflow);
+  }
+  column.appendChild(timedList);
+
+  return column;
+}
+
+function buildChip(event) {
+  const color = colorForEvent(event);
+  const chip = document.createElement('div');
+  chip.className = 'event-chip event-chip--week';
+  chip.dataset.eventType = event.eventType || 'unknown';
+  chip.style.setProperty('--event-bg', color.background);
+  chip.style.setProperty('--event-border', color.border);
+  chip.style.setProperty('--event-fg', color.textColor);
+
+  const line1 = document.createElement('div');
+  line1.className = 'event-chip__line1';
+  const badge = document.createElement('span');
+  badge.className = 'event-chip__badge';
+  badge.textContent = color.badge;
+  line1.appendChild(badge);
+  const title = document.createElement('span');
+  title.className = 'event-chip__title';
+  title.textContent = event.title;
+  line1.appendChild(title);
+  chip.appendChild(line1);
+
+  const caption = document.createElement('div');
+  caption.className = 'event-chip__caption';
+  const parts = [typeLabel(event.eventType)];
+  if (!event.allDay) {
+    parts.push(`${formatTimeLabel(event.start)}–${formatTimeLabel(event.end)}`);
+  }
+  caption.textContent = parts.join(' · ');
+  chip.appendChild(caption);
+
+  return chip;
 }

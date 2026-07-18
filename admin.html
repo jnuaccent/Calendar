@@ -1,90 +1,86 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- 이 페이지는 공개 네비게이션에서 링크하지 않는다 (관리자 전용).
-       접근 제어는 링크 숨김이 아니라 Apps Script 서버의 관리자 이메일 검증으로 이뤄진다. -->
   <meta name="robots" content="noindex, nofollow" />
   <title>동아리 캘린더 — 관리자</title>
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
   <header class="app-header">
-    <h1 class="app-title">동아리 캘린더 관리자</h1>
+    <h1 class="app-header__title">캘린더 관리자</h1>
   </header>
 
-  <main class="app-main admin-main-wrap">
-    <div id="admin-error" class="error-banner" role="alert" hidden>
-      <span id="admin-error-message"></span>
-      <button id="btn-error-dismiss" class="btn" type="button">닫기</button>
-    </div>
+  <section class="auth-section">
+    <div id="sign-in-button"></div>
+    <span id="user-label" class="auth-section__user"></span>
+    <button id="sign-out-button" type="button" class="auth-section__sign-out" hidden>로그아웃</button>
+    <p id="auth-error" class="auth-error" role="alert" hidden></p>
+  </section>
 
-    <!-- 로그아웃 상태: 로그인 안내만 표시 -->
-    <section id="signin-section" class="signin-section" aria-label="로그인">
-      <p>일정 등록/수정/삭제는 관리자 계정으로 로그인해야 합니다.</p>
-      <p id="signin-notice" class="signin-notice" aria-live="polite"></p>
-      <div id="signin-button" class="signin-button"></div>
-    </section>
+  <main id="admin-panel" class="admin-panel" hidden>
+    <form id="event-form" class="event-form">
+      <h2 id="form-mode" class="event-form__mode">새 일정 등록</h2>
 
-    <!-- 로그인 상태: 관리 UI -->
-    <section id="admin-main" class="admin-main" hidden>
-      <div class="admin-userbar">
-        <span><span id="user-email"></span> 님으로 로그인됨</span>
-        <button id="btn-signout" class="btn" type="button">로그아웃</button>
+      <fieldset class="event-form__type">
+        <legend>일정 종류</legend>
+        <label><input type="radio" name="eventType" value="band" checked /> 합주</label>
+        <label><input type="radio" name="eventType" value="lesson" /> 레슨</label>
+        <label><input type="radio" name="eventType" value="common" /> 공통 일정</label>
+      </fieldset>
+
+      <div id="team-field" class="event-form__field">
+        <label for="team-select">밴드팀</label>
+        <select id="team-select"></select>
+        <p id="weekly-count-label" class="weekly-count-label"></p>
       </div>
 
-      <section class="admin-panel" aria-labelledby="form-heading">
-        <h2 id="form-heading">일정 등록</h2>
-        <form id="event-form" novalidate>
-          <div class="form-row">
-            <label for="team-select">팀</label>
-            <select id="team-select" class="select"></select>
-          </div>
+      <div id="part-field" class="event-form__field" hidden>
+        <label for="part-select">파트</label>
+        <select id="part-select"></select>
+      </div>
 
-          <p id="weekly-count" class="weekly-count" aria-live="polite"></p>
+      <div id="common-title-field" class="event-form__field" hidden>
+        <label for="title-input">일정 제목</label>
+        <input id="title-input" type="text" placeholder="예: 정기 공연" />
+      </div>
 
-          <div class="form-row">
-            <label for="title-input">제목</label>
-            <input id="title-input" type="text" required
-                   placeholder="예: 합주 (팀 선택 시 [팀명]이 자동으로 붙습니다)" />
-          </div>
+      <div class="event-form__field">
+        <label for="date-input">날짜</label>
+        <input id="date-input" type="date" required />
+      </div>
 
-          <div class="form-row">
-            <label for="date-input">날짜</label>
-            <input id="date-input" type="date" required />
-          </div>
+      <div class="event-form__field">
+        <label><input id="all-day-input" type="checkbox" /> 종일</label>
+      </div>
 
-          <div class="form-row form-row-inline">
-            <label for="allday-checkbox">
-              <input id="allday-checkbox" type="checkbox" /> 종일 일정
-            </label>
-          </div>
+      <div id="start-time-field" class="event-form__field">
+        <label for="start-time-input">시작 시간</label>
+        <input id="start-time-input" type="time" />
+      </div>
 
-          <div id="time-fields" class="form-row form-row-inline">
-            <label for="start-time-input">시작</label>
-            <input id="start-time-input" type="time" step="600" />
-            <label for="end-time-input">종료</label>
-            <input id="end-time-input" type="time" step="600" />
-          </div>
+      <div id="end-time-field" class="event-form__field">
+        <label for="end-time-input">종료 시간</label>
+        <input id="end-time-input" type="time" />
+      </div>
 
-          <div class="form-row">
-            <label for="description-input">설명 (선택)</label>
-            <textarea id="description-input" rows="3"></textarea>
-          </div>
+      <div class="event-form__field">
+        <label for="description-input">설명 (선택)</label>
+        <textarea id="description-input" rows="2"></textarea>
+      </div>
 
-          <div class="form-actions">
-            <button id="btn-submit" class="btn btn-primary" type="submit">등록</button>
-            <button id="btn-cancel-edit" class="btn" type="button" hidden>수정 취소</button>
-          </div>
-        </form>
-      </section>
+      <p id="form-error" class="form-error" role="alert" hidden></p>
 
-      <section class="admin-panel" aria-labelledby="event-list-heading">
-        <h2 id="event-list-heading">해당 날짜의 일정</h2>
-        <p id="event-list-status" class="list-status" aria-live="polite"></p>
-        <ul id="event-list" class="admin-event-list"></ul>
-      </section>
+      <div class="event-form__actions">
+        <button id="submit-button" type="submit">등록</button>
+        <button id="cancel-edit-button" type="button" hidden>수정 취소</button>
+      </div>
+    </form>
+
+    <section class="admin-event-list-section">
+      <h2>다가오는 일정 (60일)</h2>
+      <ul id="event-list" class="admin-event-list"></ul>
     </section>
   </main>
 

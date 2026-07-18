@@ -1,99 +1,102 @@
-// 공개 페이지의 단순 상태 저장소 — 프레임워크 없음.
-// 상태 객체 + setter + "이미 가져온 날짜 범위" 메모리 캐시.
-// 렌더링 트리거는 app.js가 직접 담당한다 (pub/sub 없음).
+// 공개 페이지(app.js)가 쓰는 평범한 상태 객체 + setter + 세션 내 fetch 캐시.
+// 렌더링 방식과 완전히 무관 — 나중에 화면 계층이 통째로 바뀌어도 이 파일은 안 바뀐다.
 
-const state = {
+import { todayISO } from './dateUtils.js';
+
+export const state = {
   view: 'month', // 'month' | 'week'
-  anchorKey: null, // 현재 보고 있는 기준 날짜 키 ("YYYY-MM-DD")
-  selectedKey: null, // 상세 패널에 표시할 선택된 날짜 키
+  viewDate: todayISO(), // 현재 보고 있는 월/주를 대표하는 아무 날짜
+  selectedDate: null,
   loading: false,
-  error: null, // string | null — 사용자에게 보여줄 메시지
+  error: null,
   eventsById: new Map(),
-  eventsByDateKey: new Map(), // dateKey -> 정렬된 이벤트 배열
-  cachedRanges: [], // [{ start, end }] end는 exclusive, 겹침 없이 병합·정렬 유지
+  eventsByDateKey: new Map(), // dateISO -> sorted event[]
+  cachedRanges: [], // { start, end } exclusive-end, 병합/정렬된 상태로 유지
 };
-
-export function getState() {
-  return state;
-}
 
 export function setView(view) {
   state.view = view;
 }
 
-export function setAnchorKey(key) {
-  state.anchorKey = key;
+export function setViewDate(dateISO) {
+  state.viewDate = dateISO;
 }
 
-export function setSelectedKey(key) {
-  state.selectedKey = key;
+export function setSelectedDate(dateISO) {
+  state.selectedDate = dateISO;
 }
 
 export function setLoading(loading) {
   state.loading = loading;
 }
 
-export function setError(message) {
-  state.error = message;
+export function setError(error) {
+  state.error = error;
 }
 
-function compareEvents(a, b) {
-  if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
-  if (a.allDay) {
-    return a.startKey < b.startKey ? -1 : a.startKey > b.startKey ? 1 : a.title.localeCompare(b.title, 'ko');
-  }
-  const at = a.startLabel ?? '';
-  const bt = b.startLabel ?? '';
-  if (at !== bt) return at < bt ? -1 : 1;
-  return a.title.localeCompare(b.title, 'ko');
-}
-
-function rebuildDateIndex() {
-  state.eventsByDateKey = new Map();
-  for (const event of state.eventsById.values()) {
-    for (const key of event.dateKeys) {
-      let list = state.eventsByDateKey.get(key);
-      if (!list) {
-        list = [];
-        state.eventsByDateKey.set(key, list);
-      }
-      list.push(event);
-    }
-  }
-  for (const list of state.eventsByDateKey.values()) list.sort(compareEvents);
-}
-
-/** 새로 받아온 이벤트를 기존 캐시에 병합 (id 기준 중복 제거/갱신) */
-export function mergeEvents(events) {
-  for (const event of events) state.eventsById.set(event.id, event);
-  rebuildDateIndex();
-}
-
-/** 해당 날짜의 이벤트 목록 (종일 우선, 시작 시각 순) */
-export function eventsForKey(dateKey) {
-  return state.eventsByDateKey.get(dateKey) ?? [];
-}
-
-/** [start, end)가 이미 캐시된 범위 하나에 완전히 포함되는가 */
+/** [start, end) 범위가 이미 캐시된 범위들로 완전히 덮이는지 확인. */
 export function isRangeCached(start, end) {
   return state.cachedRanges.some((r) => r.start <= start && end <= r.end);
 }
 
-/** 캐시 범위에 [start, end) 추가 — 겹치거나 맞닿는 범위는 병합 */
-export function addCachedRange(start, end) {
+function mergeRanges(ranges) {
+  const sorted = [...ranges].sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
   const merged = [];
-  let cur = { start, end };
-  for (const r of state.cachedRanges) {
-    if (r.end < cur.start || cur.end < r.start) {
-      merged.push(r);
+  for (const r of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end) {
+      last.end = last.end > r.end ? last.end : r.end;
     } else {
-      cur = {
-        start: r.start < cur.start ? r.start : cur.start,
-        end: r.end > cur.end ? r.end : cur.end,
-      };
+      merged.push({ ...r });
     }
   }
-  merged.push(cur);
-  merged.sort((a, b) => (a.start < b.start ? -1 : 1));
-  state.cachedRanges = merged;
+  return merged;
+}
+
+/** 새로 가져온 events를 캐시에 병합하고, [start, end) 범위를 캐시된 범위로 기록한다. */
+export function mergeEvents(events, start, end) {
+  for (const event of events) {
+    state.eventsById.set(event.id, event);
+  }
+  rebuildDateIndex();
+  state.cachedRanges = mergeRanges([...state.cachedRanges, { start, end }]);
+}
+
+function rebuildDateIndex() {
+  state.eventsByDateKey.clear();
+  for (const event of state.eventsById.values()) {
+    for (const dateISO of datesForNormalizedEvent(event)) {
+      const list = state.eventsByDateKey.get(dateISO) || [];
+      list.push(event);
+      state.eventsByDateKey.set(dateISO, list);
+    }
+  }
+  for (const list of state.eventsByDateKey.values()) {
+    list.sort((a, b) => {
+      if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+      if (a.allDay) return 0;
+      return a.start - b.start;
+    });
+  }
+}
+
+function datesForNormalizedEvent(event) {
+  if (!event.allDay) return [event.startDateISO];
+  const dates = [];
+  let cursor = event.startDateISO;
+  while (cursor < event.endDateISOExclusive) {
+    dates.push(cursor);
+    cursor = addDaysISO(cursor, 1);
+  }
+  return dates;
+}
+
+function addDaysISO(dateISO, days) {
+  const [y, m, d] = dateISO.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + days, 12));
+  return dt.toISOString().slice(0, 10);
+}
+
+export function eventsOnDate(dateISO) {
+  return state.eventsByDateKey.get(dateISO) || [];
 }
