@@ -52,6 +52,9 @@ const els = {
 let bandTeams = [];
 let lessonParts = [];
 let editingEventId = null;
+let lastWeeklyCount = null; // { teamId, dateISO, count, cap, weekStartISO, weekEndISO } — refreshWeeklyCount()가 채움
+let cachedEvents = []; // refreshEventList()가 채우는 현재 목록 범위 — 쓰기 후 재조회 대신 여기에 직접 반영
+let listRange = null; // { start, end } — cachedEvents가 어떤 [start, end) 범위인지
 
 function showAuthError(message) {
   els.authError.textContent = message || '';
@@ -91,9 +94,11 @@ async function refreshWeeklyCount() {
   }
   try {
     const result = await getWeeklyBandCount(teamId, dateISO);
+    lastWeeklyCount = { teamId, dateISO, ...result };
     els.weeklyCountLabel.textContent = `이번 주(${result.weekStartISO} ~ ${result.weekEndISO}) 예약 ${result.count}/${result.cap}건`;
     els.weeklyCountLabel.dataset.overCap = String(result.count >= result.cap);
   } catch (err) {
+    lastWeeklyCount = null;
     els.weeklyCountLabel.textContent = '';
   }
 }
@@ -161,11 +166,24 @@ function buildPayload() {
 
 async function confirmOverCapIfNeeded(payload) {
   if (payload.eventType !== 'band') return true;
-  const result = await getWeeklyBandCount(payload.teamId, payload.dateISO);
+
+  // 팀/날짜를 고를 때 이미 refreshWeeklyCount()로 받아둔 값이 있으면 재사용 — 폼에 표시된
+  // 숫자와 같은 값이라 다시 물어볼 필요가 없고, 매 등록마다 왕복 하나를 줄여준다. 팀/날짜가
+  // 바뀐 직후라 아직 값이 없거나 안 맞으면(레이스 컨디션) 그때만 새로 조회한다.
+  const result =
+    lastWeeklyCount && lastWeeklyCount.teamId === payload.teamId && lastWeeklyCount.dateISO === payload.dateISO
+      ? lastWeeklyCount
+      : await getWeeklyBandCount(payload.teamId, payload.dateISO);
+
   if (result.count < result.cap) return true;
   return window.confirm(
     `⚠️ 이 팀은 이번 주 이미 ${result.count}건 예약되어 있습니다. 그래도 등록하시겠습니까?`
   );
+}
+
+function setSubmitBusy(busy) {
+  els.submitButton.disabled = busy;
+  els.submitButton.textContent = busy ? '저장 중…' : '등록';
 }
 
 async function handleSubmit(e) {
@@ -179,23 +197,30 @@ async function handleSubmit(e) {
 
   const payload = buildPayload();
 
+  setSubmitBusy(true);
   try {
     const proceed = await confirmOverCapIfNeeded(payload);
     if (!proceed) return;
 
+    // 서버 응답(eventId)만 받으면 바로 목록에 반영한다 — 쓰기 직후 Calendar API를 다시 읽으면
+    // 방금 쓴 내용이 아직 안 보일 수도 있고(전파 지연), 어차피 우리가 보낸 값 그대로이므로
+    // 왕복 하나(목록 재조회)를 통째로 아낄 수 있다.
     if (editingEventId) {
-      await updateEvent({ ...payload, eventId: editingEventId });
+      const { eventId } = await updateEvent({ ...payload, eventId: editingEventId });
+      applyUpdatedEvent(payload, eventId);
     } else {
-      await createEvent(payload);
+      const { eventId } = await createEvent(payload);
+      applyCreatedEvent(payload, eventId);
     }
     resetForm();
-    await refreshEventList();
   } catch (err) {
     if (err instanceof AdminApiError) {
       showFormError(err.message);
     } else {
       showFormError('알 수 없는 오류가 발생했습니다.');
     }
+  } finally {
+    setSubmitBusy(false);
   }
 }
 
@@ -237,23 +262,27 @@ function formatHHmm(date) {
   }).format(date);
 }
 
-async function handleDelete(event) {
+async function handleDelete(event, buttonEl) {
   if (!window.confirm(`"${event.title}" 일정을 삭제하시겠습니까?`)) return;
+  buttonEl.disabled = true;
   try {
     await deleteEvent(event.id);
-    await refreshEventList();
+    applyDeletedEvent(event.id);
   } catch (err) {
     window.alert(err instanceof AdminApiError ? err.message : '삭제에 실패했습니다.');
+    buttonEl.disabled = false;
   }
 }
 
 async function refreshEventList() {
   const start = todayISO();
   const end = addDays(start, 60);
+  listRange = { start, end };
   let events;
   try {
     events = await fetchEvents(start, end);
   } catch (err) {
+    cachedEvents = [];
     els.eventList.innerHTML = '';
     const li = document.createElement('li');
     li.textContent = err instanceof CalendarApiError ? err.message : '일정 목록을 불러오지 못했습니다.';
@@ -261,10 +290,69 @@ async function refreshEventList() {
     return;
   }
 
+  cachedEvents = events;
+  renderEventList();
+}
+
+function renderEventList() {
   els.eventList.innerHTML = '';
-  for (const event of events) {
+  for (const event of cachedEvents) {
     els.eventList.appendChild(buildEventListItem(event));
   }
+}
+
+function sortEvents(events) {
+  return [...events].sort((a, b) => {
+    if (a.startDateISO !== b.startDateISO) return a.startDateISO < b.startDateISO ? -1 : 1;
+    if (a.allDay !== b.allDay) return a.allDay ? -1 : 1;
+    return a.allDay ? 0 : a.start - b.start;
+  });
+}
+
+function isWithinListRange(dateISO) {
+  return Boolean(listRange) && dateISO >= listRange.start && dateISO < listRange.end;
+}
+
+/** payload + 서버가 돌려준 eventId로, fetchEvents()가 반환하는 것과 같은 모양의 이벤트를 만든다. */
+function buildLocalEvent(payload, eventId) {
+  const base = {
+    id: eventId,
+    title: payload.title,
+    description: payload.description || '',
+    allDay: payload.allDay,
+    eventType: payload.eventType,
+    teamId: payload.eventType === 'band' ? payload.teamId : null,
+    partId: payload.eventType === 'lesson' ? payload.partId : null,
+  };
+  if (payload.allDay) {
+    return { ...base, startDateISO: payload.dateISO, endDateISOExclusive: addDays(payload.dateISO, 1) };
+  }
+  return {
+    ...base,
+    start: new Date(`${payload.dateISO}T${payload.startTime}:00+09:00`),
+    end: new Date(`${payload.dateISO}T${payload.endTime}:00+09:00`),
+    startDateISO: payload.dateISO,
+    endDateISOExclusive: payload.dateISO,
+  };
+}
+
+function applyCreatedEvent(payload, eventId) {
+  if (!isWithinListRange(payload.dateISO)) return;
+  cachedEvents = sortEvents([...cachedEvents, buildLocalEvent(payload, eventId)]);
+  renderEventList();
+}
+
+function applyUpdatedEvent(payload, eventId) {
+  const withoutOld = cachedEvents.filter((e) => e.id !== eventId);
+  cachedEvents = isWithinListRange(payload.dateISO)
+    ? sortEvents([...withoutOld, buildLocalEvent(payload, eventId)])
+    : withoutOld;
+  renderEventList();
+}
+
+function applyDeletedEvent(eventId) {
+  cachedEvents = cachedEvents.filter((e) => e.id !== eventId);
+  renderEventList();
 }
 
 function buildEventListItem(event) {
@@ -284,7 +372,7 @@ function buildEventListItem(event) {
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
   deleteButton.textContent = '삭제';
-  deleteButton.addEventListener('click', () => handleDelete(event));
+  deleteButton.addEventListener('click', () => handleDelete(event, deleteButton));
   item.appendChild(deleteButton);
 
   return item;
