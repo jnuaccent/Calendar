@@ -15,7 +15,7 @@ export const API_KEY = 'AIzaSyCXGl6GQsFqDRdPBp1EcPOlOR4Bz0fWg8w';
 export const TIME_ZONE = 'Asia/Seoul';
 
 // Apps Script 배포(Deploy > Manage deployments)에서 나오는 /exec URL.
-export const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxQ4VEc0WqmkaR4r870ylsPjKzRXVPghHknH_nN3GAA-eh1KI2v53J3MCBh3nGSPkvL/exec';
+export const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyMdcUCgCZgZCcy5brIdq34B318OhHSdaktS5TNimEBJNvUlkI0_LNAE8Fy1rIwIuNN/exec';
 
 // Google Cloud Console에서 발급한 OAuth 2.0 클라이언트 ID(웹 애플리케이션).
 // Code.gs 상단의 OAUTH_CLIENT_ID 상수와 반드시 동일한 값이어야 한다 — 다르면 모든 관리자
