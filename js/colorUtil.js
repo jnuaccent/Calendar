@@ -52,15 +52,16 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
-/** 밴드팀: 등록순번 teamId x 황금각. 꽉 찬 칩(solid fill). */
+/** 밴드팀: 등록순번 teamId x 황금각. 꽉 찬 칩(solid fill) — 다만 채도/명도를 페일톤으로
+ * 눌러서 진하고 칙칙한 원색 대신 옅은 색 블록이 되게 한다. */
 export function colorForBandTeam(teamId) {
   const hue = normalizeHue(Number(teamId) * GOLDEN_ANGLE_DEG);
-  const saturation = 68;
-  const lightness = 46;
+  const saturation = 60;
+  const lightness = 82;
   return {
     hue,
     background: `hsl(${hue}, ${saturation}%, ${lightness}%)`,
-    border: `hsl(${hue}, ${saturation}%, ${Math.max(lightness - 12, 0)}%)`,
+    border: `hsl(${hue}, ${saturation}%, ${Math.max(lightness - 35, 30)}%)`,
     textColor: pickContrastTextColor(hue, saturation, lightness),
     badge: '합',
   };
@@ -71,21 +72,22 @@ export function colorForLessonPart(partId) {
   const hue = normalizeHue(Number(partId) * GOLDEN_ANGLE_DEG + 180);
   return {
     hue,
-    background: `hsla(${hue}, 60%, 50%, 0.12)`,
-    border: `hsl(${hue}, 60%, 42%)`,
-    textColor: `hsl(${hue}, 60%, 28%)`,
+    background: `hsla(${hue}, 65%, 55%, 0.18)`,
+    border: `hsl(${hue}, 55%, 55%)`,
+    textColor: `hsl(${hue}, 55%, 32%)`,
     badge: '레',
   };
 }
 
-/** 공통 일정: 생성된 hue 공간과 절대 겹치지 않는 고정 남색, 밴드/레슨과 다른 solid 스타일. */
+/** 공통 일정: 생성된 hue 공간과 절대 겹치지 않는 고정 남색, 밴드/레슨과 다른 solid 스타일 —
+ * 다만 이것도 진한 남색 블록 대신 옅은 남색 페일톤으로. */
 export function colorForCommon() {
   const hue = 222;
   return {
     hue,
-    background: `hsl(${hue}, 45%, 30%)`,
-    border: `hsl(${hue}, 45%, 22%)`,
-    textColor: '#ffffff',
+    background: `hsl(${hue}, 55%, 85%)`,
+    border: `hsl(${hue}, 45%, 45%)`,
+    textColor: `hsl(${hue}, 45%, 28%)`,
     badge: '공',
   };
 }
@@ -115,9 +117,9 @@ export function colorForUnknown(title) {
   const hue = normalizeHue(hashString(title || ''));
   return {
     hue,
-    background: `hsl(${hue}, 12%, 55%)`,
-    border: `hsl(${hue}, 12%, 40%)`,
-    textColor: '#ffffff',
+    background: `hsl(${hue}, 15%, 88%)`,
+    border: `hsl(${hue}, 15%, 55%)`,
+    textColor: `hsl(${hue}, 15%, 30%)`,
     badge: '?',
     dashed: true,
   };
