@@ -222,6 +222,14 @@ button {
   }
   .event-chip {
     font-size: 0.68rem;
+    padding: 1px 3px;
+    gap: 2px;
+  }
+  /* 월간 뷰 칸이 7등분되면 폭이 ~50px 안팎이라, 배지(합/레/공/?)까지 넣으면 제목이 한 글자도
+     못 남고 말줄임된다. 배지는 범례에서 이미 설명하니, 좁은 화면에서는 과감히 빼고 그
+     공간을 전부 제목에 준다. */
+  .month-grid .event-chip__badge {
+    display: none;
   }
 }
 

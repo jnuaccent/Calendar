@@ -117,9 +117,9 @@ export function colorForUnknown(title) {
   const hue = normalizeHue(hashString(title || ''));
   return {
     hue,
-    background: `hsl(${hue}, 15%, 88%)`,
-    border: `hsl(${hue}, 15%, 55%)`,
-    textColor: `hsl(${hue}, 15%, 30%)`,
+    background: `hsl(${hue}, 38%, 85%)`,
+    border: `hsl(${hue}, 38%, 50%)`,
+    textColor: `hsl(${hue}, 38%, 28%)`,
     badge: '?',
     dashed: true,
   };
