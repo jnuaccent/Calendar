@@ -104,7 +104,7 @@ function selectDate(dateISO) {
 function switchView(view) {
   if (state.view === view) return;
   setView(view);
-  ensureRangeLoaded();
+  ensureRangeLoaded().then(scrollTodayIntoView);
 }
 
 function navigate(deltaUnits) {
@@ -121,7 +121,15 @@ function navigate(deltaUnits) {
 function goToday() {
   setViewDate(todayISO());
   setSelectedDate(todayISO());
-  ensureRangeLoaded();
+  ensureRangeLoaded().then(scrollTodayIntoView);
+}
+
+// 주간 뷰는 모바일 폭에서 7일이 세로로 쌓이므로, '오늘'로 이동해도 실제로 스크롤해주지
+// 않으면 화면이 그대로인 것처럼 보인다. prev/next 탐색 시에는 부르지 않는다 — 사용자가
+// 보고 있던 위치를 임의로 오늘로 되돌리면 오히려 방해가 된다.
+function scrollTodayIntoView() {
+  if (state.view !== 'week') return;
+  els.weekGrid.querySelector('.week-grid__column--today')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function wireEvents() {

@@ -36,7 +36,17 @@ function buildDayColumn(dateISO, today, onSelectDate) {
   header.className = 'week-grid__day-header';
   header.dataset.date = dateISO;
   if (dateISO === today) header.setAttribute('aria-current', 'date');
-  header.textContent = `${WEEKDAY_FORMATTER.format(new Date(dateISO + 'T12:00:00'))} ${Number(dateISO.slice(8, 10))}`;
+
+  const weekdayLabel = document.createElement('span');
+  weekdayLabel.className = 'week-grid__weekday-label';
+  weekdayLabel.textContent = WEEKDAY_FORMATTER.format(new Date(dateISO + 'T12:00:00'));
+  header.appendChild(weekdayLabel);
+
+  const dayNumber = document.createElement('span');
+  dayNumber.className = 'week-grid__day-number';
+  dayNumber.textContent = String(Number(dateISO.slice(8, 10)));
+  header.appendChild(dayNumber);
+
   header.addEventListener('click', () => onSelectDate(dateISO));
   column.appendChild(header);
 

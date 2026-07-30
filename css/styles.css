@@ -189,6 +189,42 @@ button {
   }
 }
 
+/* 실제 작업 환경은 대부분 모바일 — 좁은 화면에서는 여백/폰트를 줄여서 한 화면에
+   더 들어오게 한다. */
+@media (max-width: 480px) {
+  .app-header {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+  .app-header__title {
+    font-size: 1.05rem;
+  }
+  .app-header__legend {
+    gap: var(--space-2);
+    font-size: 0.75rem;
+  }
+  .toolbar {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+  }
+  .calendar-main {
+    padding: var(--space-2);
+    gap: var(--space-2);
+  }
+  .month-grid__cell {
+    min-height: 64px;
+    padding: 2px;
+  }
+  .month-grid__day-number {
+    width: 1.4em;
+    height: 1.4em;
+    font-size: 0.78rem;
+  }
+  .event-chip {
+    font-size: 0.68rem;
+  }
+}
+
 /* ---- 월간 그리드 ---- */
 
 .month-grid__weekdays,
@@ -205,6 +241,7 @@ button {
 }
 
 .month-grid__cell {
+  min-width: 0;
   min-height: 84px;
   border: 1px solid var(--color-border);
   background: var(--color-bg);
@@ -220,15 +257,27 @@ button {
   color: var(--color-text-muted);
   background: var(--color-surface);
 }
-.month-grid__cell--today {
-  box-shadow: inset 0 0 0 2px var(--color-today-ring);
-}
+/* 선택된 날짜는 클릭할 때마다 이동하는 표시 — 셀 전체에 링을 친다.
+   "오늘" 표시(날짜 숫자 배지, 아래)와는 별개 — 둘이 같은 시각 언어를 쓰면
+   선택해도 안 움직이는 것처럼 보여 혼동을 준다. */
 .month-grid__cell--selected {
-  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
 .month-grid__day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
   font-size: 0.85rem;
+}
+/* 오늘은 날짜 숫자에 고정 배지 — 어느 뷰/선택 상태에서도 항상 같은 자리에서 식별 가능. */
+.month-grid__cell--today .month-grid__day-number {
+  background: var(--color-today-ring);
+  color: #fff;
+  font-weight: 600;
 }
 
 .month-grid__chips {
@@ -251,6 +300,7 @@ button {
 }
 
 .week-grid__column {
+  min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: var(--space-2);
@@ -259,11 +309,10 @@ button {
   gap: var(--space-2);
   min-height: 320px;
 }
-.week-grid__column--today {
-  box-shadow: inset 0 0 0 2px var(--color-today-ring);
-}
+/* 선택된 날짜 = 컬럼 전체 링(클릭할 때마다 이동). 오늘 표시는 아래 day-number 배지가 담당 —
+   월간 뷰와 같은 원칙. */
 .week-grid__column--selected {
-  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
 .week-grid__day-header {
@@ -273,6 +322,22 @@ button {
   font-weight: 600;
   text-align: left;
   padding: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.week-grid__day-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+}
+.week-grid__column--today .week-grid__day-number {
+  background: var(--color-today-ring);
+  color: #fff;
 }
 
 .week-grid__all-day,
