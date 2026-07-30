@@ -8,6 +8,10 @@ import { state, eventsOnDate } from './state.js';
 const MAX_CHIPS_PER_CELL = 8;
 const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('ko-KR', { weekday: 'short', timeZone: 'Asia/Seoul' });
 
+// container(#week-grid)는 index.html에서 이미 .week-grid 클래스(display:grid)를 갖고 있다 —
+// 여기서 또 .week-grid div를 만들어 그 안에 넣으면 그리드 안에 그리드가 중첩되어, 바깥 그리드의
+// 유일한 아이템(안쪽 그리드)이 트랙 1칸 폭(전체의 1/7)에 눌리고, 그 안에서 7칸이 다시 나뉘어
+// 컬럼이 실제 폭의 1/49로 찌그러진다 — 그래서 컬럼에 바로 붙인다.
 export function renderWeek(container, { onSelectDate }) {
   container.innerHTML = '';
   container.setAttribute('role', 'grid');
@@ -15,14 +19,9 @@ export function renderWeek(container, { onSelectDate }) {
   const dates = weekDates(state.viewDate);
   const today = todayISO();
 
-  const grid = document.createElement('div');
-  grid.className = 'week-grid';
-
   for (const dateISO of dates) {
-    grid.appendChild(buildDayColumn(dateISO, today, onSelectDate));
+    container.appendChild(buildDayColumn(dateISO, today, onSelectDate));
   }
-
-  container.appendChild(grid);
 }
 
 function buildDayColumn(dateISO, today, onSelectDate) {
